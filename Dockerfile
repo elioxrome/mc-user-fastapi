@@ -11,7 +11,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN uv pip install --system --no-cache -r requirements.txt
 
-COPY app ./app
+COPY . .
 
 EXPOSE 8000
 
