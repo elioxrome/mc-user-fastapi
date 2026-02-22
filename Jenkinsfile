@@ -4,7 +4,6 @@ pipeline {
   agent any
 
   parameters {
-    string(name: 'APP_NAME', defaultValue: 'mc-user-fastapi', description: 'Nombre de la app')
     booleanParam(name: 'DEPLOY', defaultValue: true, description: 'Ejecutar deploy')
     string(name: 'DEPLOY_IMAGE_TAG', defaultValue: 'latest', description: 'Tag de imagen Docker')
     choice(name: 'ENV', choices: ['dev', 'staging', 'prod'], description: 'Environment lógico')
@@ -16,7 +15,7 @@ pipeline {
       steps {
         script {
           enterprisePipeline([
-            appName: params.APP_NAME,
+            appName: 'mc-user-fastapi',
             deploy: params.DEPLOY,
             environment: params.ENV,
             agentLabel: 'built-in',
@@ -24,7 +23,7 @@ pipeline {
             kubeconfigCredentialsId: params.KUBECONFIG_CREDENTIALS_ID,
             deployRepoUrl: 'https://github.com/elioxrome/eliox-platform-config',
             deployRepoBranch: 'main',
-            helmChartPath: "charts/${params.APP_NAME}",
+            helmChartPath: "charts/mc-user-fastapi",
             deployNamespace: 'apps',
             kindClusterName: 'local-cluster',
             deployImageTag: params.DEPLOY_IMAGE_TAG
