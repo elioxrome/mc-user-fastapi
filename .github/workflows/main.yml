@@ -65,7 +65,7 @@ jobs:
         with:
           token: ${{ secrets.DEPLOY_REPO_PAT }}
           path: deploy
-          branch: gitops/dev-${{ steps.vars.outputs.tag }}
+          branch: pr-gitops-dev-${{ steps.vars.outputs.tag }}
           title: "deploy(dev): ${{ vars.APP_NAME }}:${{ steps.vars.outputs.tag }}"
           commit-message: "deploy(dev): ${{ vars.APP_NAME }}:${{ steps.vars.outputs.tag }}"
           body: |
