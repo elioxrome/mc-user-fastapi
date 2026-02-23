@@ -48,6 +48,23 @@ jobs:
           persist-credentials: false
           fetch-depth: 0
 
+      - name: Force git auth for deploy repo
+        working-directory: deploy
+        run: |
+          # Asegura remote correcto
+          git remote set-url origin https://github.com/${{ vars.REPO_HELM }}.git
+
+          # Borra cualquier auth previa
+          git config --local --unset-all http.https://github.com/.extraheader || true
+          git config --local --unset-all http.https://github.com/.extraheader || true
+
+          # Inyecta auth con el PAT
+          AUTH="$(printf "x-access-token:${{ secrets.DEPLOY_REPO_PAT }}" | base64 -w0)"
+          git config --local http.https://github.com/.extraheader "AUTHORIZATION: basic ${AUTH}"
+
+          # Debug útil (no imprime token)
+          git config --local --get remote.origin.url
+
       - name: Debug token permissions
         working-directory: deploy
         env:
