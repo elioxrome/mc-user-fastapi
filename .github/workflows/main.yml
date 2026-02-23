@@ -45,6 +45,15 @@ jobs:
           repository: ${{ vars.REPO_HELM }}
           token: ${{ secrets.DEPLOY_REPO_PAT }}
           path: deploy
+      - name: Debug token permissions
+        working-directory: deploy
+        env:
+          GH_TOKEN: ${{ secrets.DEPLOY_REPO_PAT }}
+        run: |
+          echo "Token user:"
+          curl -s -H "Authorization: token ${GH_TOKEN}" https://api.github.com/user | jq -r '.login'
+          echo "Repo perms:"
+          curl -s -H "Authorization: token ${GH_TOKEN}" https://api.github.com/repos/${{ vars.REPO_HELM }} | jq -r '.full_name, .permissions'
 
       - name: Install yq
         run: |
