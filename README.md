@@ -13,15 +13,22 @@ Microservicio en FastAPI con arquitectura hexagonal y datos mockeados en memoria
 
 ## Requisitos
 
-- Python 3.11+
+- Python 3.12+
 
-## Ejecutar
+## Ejecutar con pip
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
 uvicorn app.main:app --reload
+```
+
+## Ejecutar con Poetry
+
+```powershell
+poetry install
+poetry run uvicorn app.main:app --reload
 ```
 
 ## Ejecutar con Docker
@@ -38,6 +45,13 @@ El `Dockerfile` usa `uv` para instalar dependencias desde `requirements.txt`.
 ```powershell
 uv pip install -r requirements-dev.txt
 uv run pytest
+```
+
+Con Poetry:
+
+```powershell
+poetry install --with dev
+poetry run pytest
 ```
 
 ## Endpoints
