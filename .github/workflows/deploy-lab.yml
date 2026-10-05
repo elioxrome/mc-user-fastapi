@@ -3,9 +3,12 @@ name: Deploy to lab (argocd-kind-lab)
 # Flujo del LABORATORIO (ver eliox-gitops-harness/CLAUDE.md, sección "Dos
 # flujos"). No toca eliox-platform-config ni abre PRs ahi: construye su
 # propia imagen (tag "lab-dev-*" para no chocar con los tags "dev-*" del
-# flujo real de main.yml), publica un release chart en el Artifactory del
-# lab (artifactory/publish-release-chart.sh de argocd-kind-lab) y fuerza el
-# refresh de la Application en ArgoCD.
+# flujo real de main.yml), actualiza y commitea el values.yaml en
+# argocd-kind-lab (push directo a main, no PR - a diferencia del flujo real
+# el trigger de este workflow ya es push a main, asi que un PR aqui no
+# aportaria revision adicional), publica el release chart resultante en el
+# Artifactory del lab (artifactory/publish-release-chart.sh de
+# argocd-kind-lab) y fuerza el refresh de la Application en ArgoCD.
 #
 # Necesita un runner self-hosted (label "kind-local") en la misma maquina
 # donde corre el kind cluster del lab, con kubeconfig ya apuntando al
@@ -31,6 +34,7 @@ jobs:
         with:
           repository: elioxrome/argocd-kind-lab
           path: lab
+          token: ${{ secrets.DEPLOY_REPO_PAT }}
 
       - name: Checkout generic-charts-ms
         uses: actions/checkout@v4
@@ -75,11 +79,14 @@ jobs:
 
       - name: Prepare values.yaml for the release chart
         run: |
-          VALUES="lab/artifactory/example-values-chart/values.yaml"
-          cp "$VALUES" ./lab-values.yaml
-          yq -i '.image.repository = "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.APP_NAME }}"' ./lab-values.yaml
-          yq -i '.image.tag = "${{ steps.vars.outputs.tag }}"' ./lab-values.yaml
-          cat ./lab-values.yaml
+          # Se edita in-place dentro del checkout de argocd-kind-lab (no en
+          # un archivo descartable del workspace) para poder commitearlo de
+          # vuelta mas abajo - asi queda en git que tag se publico y cuando,
+          # igual que el flujo real deja rastro via PR en eliox-platform-config.
+          VALUES="lab/artifactory/releases/${{ vars.APP_NAME }}/values.yaml"
+          yq -i '.image.repository = "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.APP_NAME }}"' "$VALUES"
+          yq -i '.image.tag = "${{ steps.vars.outputs.tag }}"' "$VALUES"
+          cat "$VALUES"
 
       - name: Write Artifactory credentials for the lab scripts
         env:
@@ -96,8 +103,21 @@ jobs:
         run: |
           ./lab/artifactory/publish-release-chart.sh \
             ./generic-chart \
-            ./lab-values.yaml \
+            lab/artifactory/releases/${{ vars.APP_NAME }}/values.yaml \
             ${{ vars.APP_NAME }} 0.1.0-dev
+
+      - name: Record the deployed values in argocd-kind-lab
+        run: |
+          cd lab
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add "artifactory/releases/${{ vars.APP_NAME }}/values.yaml"
+          if git diff --cached --quiet; then
+            echo "sin cambios en el values, no hace falta commit"
+          else
+            git commit -m "deploy(lab/dev): ${{ vars.APP_NAME }}:${{ steps.vars.outputs.tag }}"
+            git push https://x-access-token:${{ secrets.DEPLOY_REPO_PAT }}@github.com/elioxrome/argocd-kind-lab.git main
+          fi
 
       - name: Install/update the ApplicationSet in ArgoCD
         run: |
