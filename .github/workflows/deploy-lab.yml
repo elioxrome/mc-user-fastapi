@@ -63,9 +63,15 @@ jobs:
 
       - name: Install yq
         run: |
-          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
-          sudo chmod +x /usr/local/bin/yq
-          yq --version
+          # Sin sudo: el runner self-hosted no tiene terminal para la
+          # password. Ademas /usr/bin/yq en esta laptop es OTRO yq (el
+          # wrapper en Python de jq, sintaxis incompatible) - se instala en
+          # $HOME/.local/bin y se antepone al PATH para no chocar con ese.
+          mkdir -p "$HOME/.local/bin"
+          wget -qO "$HOME/.local/bin/yq" https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x "$HOME/.local/bin/yq"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          "$HOME/.local/bin/yq" --version
 
       - name: Prepare values.yaml for the release chart
         run: |
