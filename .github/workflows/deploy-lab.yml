@@ -1,0 +1,126 @@
+name: Deploy to lab (argocd-kind-lab)
+
+# Flujo del LABORATORIO (ver eliox-gitops-harness/CLAUDE.md, sección "Dos
+# flujos"). No toca eliox-platform-config ni abre PRs ahi: construye su
+# propia imagen (tag "lab-dev-*" para no chocar con los tags "dev-*" del
+# flujo real de main.yml), publica un release chart en el Artifactory del
+# lab (artifactory/publish-release-chart.sh de argocd-kind-lab) y fuerza el
+# refresh de la Application en ArgoCD.
+#
+# Necesita un runner self-hosted (label "kind-local") en la misma maquina
+# donde corre el kind cluster del lab, con kubeconfig ya apuntando al
+# contexto "kind-hub" (el mismo patron que ya usa generic-charts-ms/.github/
+# workflows/publish.yml). GitHub-hosted no puede alcanzar
+# artifactory.artifactory.svc.cluster.local ni el API server de kind.
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+
+jobs:
+  deploy-lab:
+    runs-on: [self-hosted, kind-local]
+
+    steps:
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+
+      - name: Checkout argocd-kind-lab
+        uses: actions/checkout@v4
+        with:
+          repository: elioxrome/argocd-kind-lab
+          path: lab
+
+      - name: Checkout generic-charts-ms
+        uses: actions/checkout@v4
+        with:
+          repository: elioxrome/generic-charts-ms
+          path: generic-chart
+
+      - name: Compute image tag
+        id: vars
+        run: |
+          SHORT_SHA="${GITHUB_SHA::8}"
+          TAG="lab-dev-${GITHUB_RUN_NUMBER}-${SHORT_SHA}"
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build & Push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.APP_NAME }}:${{ steps.vars.outputs.tag }}
+
+      - name: Install yq
+        run: |
+          sudo wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+          yq --version
+
+      - name: Prepare values.yaml for the release chart
+        run: |
+          VALUES="lab/artifactory/example-values-chart/values.yaml"
+          cp "$VALUES" ./lab-values.yaml
+          yq -i '.image.repository = "docker.io/${{ secrets.DOCKERHUB_USERNAME }}/${{ vars.APP_NAME }}"' ./lab-values.yaml
+          yq -i '.image.tag = "${{ steps.vars.outputs.tag }}"' ./lab-values.yaml
+          cat ./lab-values.yaml
+
+      - name: Write Artifactory credentials for the lab scripts
+        env:
+          ARTIFACTORY_USER: ${{ secrets.ARTIFACTORY_USER }}
+          ARTIFACTORY_PASSWORD: ${{ secrets.ARTIFACTORY_PASSWORD }}
+        run: |
+          mkdir -p lab/.generated
+          cat > lab/.generated/artifactory-admin.env <<EOF
+          ARTIFACTORY_USER=${ARTIFACTORY_USER}
+          ARTIFACTORY_PASSWORD=${ARTIFACTORY_PASSWORD}
+          EOF
+
+      - name: Publish release chart (mc-user-fastapi-0.1.0-dev)
+        run: |
+          ./lab/artifactory/publish-release-chart.sh \
+            ./generic-chart \
+            ./lab-values.yaml \
+            ${{ vars.APP_NAME }} 0.1.0-dev
+
+      - name: Install/update the ApplicationSet in ArgoCD
+        run: |
+          kubectl --context kind-hub apply -f lab/argocd/applicationsets/${{ vars.APP_NAME }}-appset.yaml
+
+      - name: Force ArgoCD to pick up the new chart content
+        run: |
+          APP="${{ vars.APP_NAME }}-dev"
+          NS="argocd-it4t"
+          for _ in $(seq 1 30); do
+            kubectl --context kind-hub -n "$NS" get application "$APP" >/dev/null 2>&1 && break
+            sleep 2
+          done
+          kubectl --context kind-hub -n "$NS" annotate application "$APP" \
+            argocd.argoproj.io/refresh=hard --overwrite
+
+      - name: Wait for sync + print status
+        run: |
+          APP="${{ vars.APP_NAME }}-dev"
+          NS="argocd-it4t"
+          for _ in $(seq 1 60); do
+            SYNC=$(kubectl --context kind-hub -n "$NS" get application "$APP" -o jsonpath='{.status.sync.status}' 2>/dev/null || true)
+            HEALTH=$(kubectl --context kind-hub -n "$NS" get application "$APP" -o jsonpath='{.status.health.status}' 2>/dev/null || true)
+            echo "sync=$SYNC health=$HEALTH"
+            [[ "$SYNC" == "Synced" && "$HEALTH" == "Healthy" ]] && break
+            sleep 5
+          done
+          kubectl --context kind-hub -n apps-dev get pods -o wide
+
+      - name: Clean up credentials file
+        if: always()
+        run: rm -f lab/.generated/artifactory-admin.env
